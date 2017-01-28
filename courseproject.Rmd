@@ -1,0 +1,107 @@
+---
+title: "Machine Learning Course Project"
+date: "January 28, 2017"
+output: html_document
+---
+## Load data and subset training set
+
+```{r, cache = TRUE}
+training <- read.csv("pml_training.csv")
+testing <- read.csv("pml_testing.csv")
+```
+
+After loading the data, we will further subset the training set into sets for training and validation:
+```{r, cache = TRUE}
+set.seed(1234)
+library(caret)
+inTrain <- createDataPartition(training$classe, p = 0.7, list = FALSE)
+training_new <- training[inTrain,]
+validation <- training[-inTrain,]
+```
+
+## Exploratory data analysis and cleaning
+
+From looking at the dimensions of the data set and the number of complete cases, we see that there are many missing values.
+```{r}
+dim(training_new)
+sum(complete.cases(training_new))
+```
+
+If we further examine the data, we notice that some of the variables have a high percentage of missing values. Rather than impute values based on a small percentage of actual observations, we will remove these variables from the training set. 
+```{r}
+training_new[training_new == ""] <- NA
+missing <- sapply(training_new, function(x) mean(is.na(x)))
+plot(missing, ylab = "Percentage of missing values", xlab = "Variable index")
+training2 <- training_new[, missing < 0.9]
+dim(training2)
+sum(complete.cases(training2))
+```
+
+This removes `r sum(missing > 0.9)` variables and the number of complete cases is now equal to the number of observations.
+
+We also see that there is a non random pattern between the variable X (the row number) and the class. Since this is likely an artifact of the experiment, we will remove the variable X. Similarly, we will assume that this data is not time-series dependent because it was a controlled experiment, where the participants were instructed to do the exercise in a certain way by the investigators. Therefore, we will also remove the timestamp variables.
+
+```{r}
+plot(training2$X, training_new$classe)
+training3 <- training2[,-c(1, 3:5)]
+```
+
+## Prediction Model Comparison 
+
+We will compare the accuracy of 2 different model types:  
+- Linear discriminate analysis  
+- Random forest
+
+Linear discriminate analysis uses a linear combination of variables to classify events. Random forests create many trees and then combines classifiers to improve accuracy.  While an advantage of a random forest approach is accuracy, these models require longer computation times and may overfit the data. 
+
+### Cross Validation
+
+We will use 3-fold cross validation, meaning the data will be split into 3 different sets of training/test sets. This is implemented using the "trControl" option in the train function in the caret pacakge. Here, the final model accuracy is then the average of the estimated errors.
+
+```{r, cache = TRUE}
+library(caret)
+mod1 <- train(classe ~ ., data = training3, method = "lda", trControl = trainControl(method="cv", number=3))
+confusionMatrix(mod1)
+```
+
+```{r, cache = TRUE}
+library(randomForest)
+mod2 <- train(classe ~ ., data = training3, method = "rf", ntree = 100, trControl = trainControl(method="cv", number=3))
+confusionMatrix(mod2)
+```
+
+### Accuracy for the two models
+
+From the R output above we see that, as expected, the in sample accuracy of the random forest model was higher than the linear discriminate analysis model (0.9953 vs. 0.7416). The out of sample accuracy of the random forest model would be lower than 0.9953 if the model is overfitting the data. In other words, the out of sample error may be higher if the random forest model is overfitting the training data set.
+
+## Out of sample error for random forest model using validation data set
+
+Since the random forest model had much higher accuracy, we will test that model on the validation data set.
+
+First, we need to perform the same data cleaning steps that were performed on the training data set.
+```{r}
+validation2 <- validation[, missing < 0.9]
+validation3 <- validation2[,-c(1, 3:5)]
+```
+
+Next, we will predict the values for the validation set using the random forest model and compare them to the true values. 
+```{r, warning = FALSE}
+suppressMessages(library(randomForest))
+suppressMessages(library(caret))
+predval <- predict(mod2, validation3)
+confusionMatrix(validation3$classe, predval)
+```
+
+For this validation data set, we see that the accuracy is 0.999, which is similar to the in sample accuracy. 
+
+## Prediction of test set values
+
+Finally, we will predict the classe values for the test set using the random forest model. The true values of classe for these observations are unknown. Again, we need to first perform the same data cleaning steps as were performed on the training set.  
+```{r}
+testing2 <- testing[, missing < 0.9]
+testing3 <- testing2[,-c(1, 3:5)]
+pred_test <- predict(mod2, testing3)
+data.frame(pred_test)
+```
+
+
